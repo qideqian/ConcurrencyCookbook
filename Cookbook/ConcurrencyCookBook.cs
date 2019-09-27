@@ -1,9 +1,12 @@
-﻿using System;
+﻿using Nito.AsyncEx;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
+using System.Windows.Input;
 
 namespace Cookbook
 {
@@ -189,7 +192,7 @@ namespace Cookbook
         /// <param name="urlA"></param>
         /// <param name="urlB"></param>
         /// <returns></returns>
-        private static async Task<int> FirstRespondingUrlAsync(string urlA,string urlB)
+        private static async Task<int> FirstRespondingUrlAsync(string urlA, string urlB)
         {
             var httpClient = new HttpClient();
             //并发地开始两个下载任务。
@@ -204,8 +207,124 @@ namespace Cookbook
         #endregion
 
         #region 2.6任务完成时的处理
+        static async Task<int> DelayAndReturnAsync(int val)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(val));
+            return val;
+        }
 
+        //当前，此方法输出2、3、1
+        //我们希望它输出1、2、3
+        static async Task ProcessTasksAsync()
+        {
+            //创建任务队列
+            Task<int> taskA = DelayAndReturnAsync(2);
+            Task<int> taskB = DelayAndReturnAsync(3);
+            Task<int> taskC = DelayAndReturnAsync(1);
+            var tasks = new[] { taskA, taskB, taskC };
+            //按顺序await每个任务
+            foreach (var task in tasks)
+            {
+                var result = await task;
+                Trace.WriteLine(result);
+            }
+        }
+
+        static async Task AwaitAndProcessAsync(Task<int> task)
+        {
+            var result = await task;
+            Trace.WriteLine(result);
+        }
+
+        //现在这个方法输出1、2、3
+        static async Task ProcessTasksAsync2()
+        {
+            //创建任务队列
+            Task<int> taskA = DelayAndReturnAsync(2);
+            Task<int> taskB = DelayAndReturnAsync(3);
+            Task<int> taskC = DelayAndReturnAsync(1);
+            var tasks = new[] { taskA, taskB, taskC };
+            var processintTasks = (from t in tasks select AwaitAndProcessAsync(t)).ToArray();
+            //等待全部处理过程的完成
+            await Task.WhenAll(processintTasks);
+        }
+
+        static async Task ProcessTasksAsync3()
+        {
+            //创建任务队列
+            Task<int> taskA = DelayAndReturnAsync(2);
+            Task<int> taskB = DelayAndReturnAsync(3);
+            Task<int> taskC = DelayAndReturnAsync(1);
+            var tasks = new[] { taskA, taskB, taskC };
+            var processintTasks = tasks.Select(async t =>
+            {
+                var result = await t;
+                Trace.WriteLine(result);
+            }).ToArray();
+            //等待全部处理过程的完成
+            await Task.WhenAll(processintTasks);
+        }
+
+        /// <summary>
+        /// 利用扩展方法
+        /// 在NuGet包Nito.AsyncEx中
+        /// </summary>
+        /// <returns></returns>
+        static async Task UseOrderByCompletionAsync()
+        {
+            //创建任务队列
+            Task<int> taskA = DelayAndReturnAsync(2);
+            Task<int> taskB = DelayAndReturnAsync(3);
+            Task<int> taskC = DelayAndReturnAsync(1);
+            var tasks = new[] { taskA, taskB, taskC };
+
+            //等待每一个任务完成
+            foreach (var task in tasks.OrderByCompletion())
+            {
+                var result = await task;
+                Trace.WriteLine(result);
+            }
+        }
         #endregion
+
+        #region 2.7避免上下文延续
+        async Task ResumeOnContextAsync()
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+        }
+        #endregion
+
+        #region 2.8处理async Task方法的异常
+        static async Task ThrowExceptionAsync()
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            throw new InvalidOperationException("Test");
+        }
+
+        static async Task TestAsync()
+        {
+            //方式一
+            try
+            {
+                await ThrowExceptionAsync();
+            }
+            catch (InvalidOperationException) { }
+
+            //方式二
+            //抛出异常并将其存储在Task中。
+            Task task = ThrowExceptionAsync();
+            try
+            {
+                //Task对象被await调用，异常在这里再次被引发。
+                await task;
+            }
+            catch (InvalidOperationException)
+            {
+                //这里，异常被正确地捕获
+            }
+        }
+        #endregion
+
     }
 
     #region 2.2返回完成的任务
@@ -218,6 +337,54 @@ namespace Cookbook
         public Task<int> GetValueAsync()
         {
             return Task.FromResult(13);//可以使用Task.FromResult方法创建并返回一个新的Task<T>对象，这个Task对象是已经完成的，并有指定的值。
+        }
+    }
+    #endregion
+
+    #region 2.9处理async void方法的异常
+    //(一般可通过程序的上下文获取并处理异常，如ASP.NET的Application_Error，如果不带SynchronizationContext上下文的程序，可使用在NuGet包Nito.AsyncEx中的AsyncContext，如果控制台程序、Win32服务程序)
+    //如果必须使用async void，可以封装返回一个Task类型的重载
+    sealed class MyAsyncCommand : ICommand
+    {
+        public event EventHandler CanExecuteChanged;
+
+        public bool CanExecute(object parameter)
+        {
+            throw new NotImplementedException();
+        }
+
+        //public void Execute(object parameter)
+        //{
+        //    throw new NotImplementedException();
+        //}
+
+        async void ICommand.Execute(object parameter)
+        {
+            await Execute(parameter);
+        }
+
+        public async Task Execute(object parameter)
+        {
+            await Task.FromResult<int>(1);
+        }
+
+
+        static int Main(string[] args)
+        {
+            try
+            {
+                return AsyncContext.Run(() => MainAsync(args));
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(ex);
+                return -1;
+            }
+        }
+        static async Task<int> MainAsync(string[] args)
+        {
+            await Task.Delay(1);
+            return 1;
         }
     }
     #endregion
