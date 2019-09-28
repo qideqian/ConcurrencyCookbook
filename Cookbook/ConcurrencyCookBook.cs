@@ -369,7 +369,7 @@ namespace Cookbook
         }
 
 
-        static int Main(string[] args)
+        static int Main1(string[] args)
         {
             try
             {
