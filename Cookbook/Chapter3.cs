@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Text;
@@ -91,7 +92,7 @@ namespace Cookbook
         }
         #endregion
 
-        #region 并行调用
+        #region 3.3并行调用
         //分为两个数组处理
         static void ProcessArray(double[] array)
         {
@@ -121,5 +122,58 @@ namespace Cookbook
             Parallel.Invoke(new ParallelOptions { CancellationToken = token }, actions);
         }
         #endregion
+
+        #region 3.4动态并行
+        void Traverse(Node current)
+        {
+            //DoExpensiveActionOnNode(current);
+            if (current.Left != null)
+            {
+                Task.Factory.StartNew(() => Traverse(current.Left), CancellationToken.None, TaskCreationOptions.AttachedToParent, TaskScheduler.Default);
+            }
+            if (current.Right != null)
+            {
+                Task.Factory.StartNew(() => Traverse(current.Right), CancellationToken.None, TaskCreationOptions.AttachedToParent, TaskScheduler.Default);
+            }
+        }
+
+        //创建一个最高级的父任务，并等待任务完成
+        public void ProcessTree(Node root)
+        {
+            var task = Task.Factory.StartNew(() => Traverse(root), CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
+            task.Wait();
+
+            Task task2 = Task.Factory.StartNew(() => Thread.Sleep(TimeSpan.FromSeconds(2)), CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
+            Task continuation = task2.ContinueWith(t => Trace.WriteLine("Task is done"), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+            //对continuation来说，参数t相当于task2
+        }
+
+        #endregion
+
+        #region 并行LINQ
+        //将序列中的每个元素乘以2
+        static IEnumerable<int> MultiplyBy2(IEnumerable<int> values)
+        {
+            return values.AsParallel().Select(item => item * 2);
+        }
+
+        //将序列中的每个元素乘以2,并保留数据的原有次序
+        static IEnumerable<int> MultiplyBy2_2(IEnumerable<int> values)
+        {
+            return values.AsParallel().AsOrdered().Select(item => item * 2);
+        }
+
+        //并行的累加求和
+        static int ParallelSum4(IEnumerable<int> values)
+        {
+            return values.AsParallel().Sum();
+        }
+        #endregion
+    }
+    class Node
+    {
+        public Node Left { get; set; }
+        public Node Right { get; set; }
+        public string Text { get; set; }
     }
 }
