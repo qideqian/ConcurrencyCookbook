@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using System.Reactive.Threading.Tasks;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -114,6 +116,46 @@ namespace Cookbook
             Observable.FromEventPattern<MouseEventHandler, MouseEventArgs>(handler => (s, a) => handler(s, a), handler => MouseMove += handler, handler => MouseMove -= handler)
                 .Buffer(TimeSpan.FromSeconds(1))
                 .Subscribe(x => Trace.WriteLine(DateTime.Now.Second + ":Saw " + x.Count + " items."));
+        }
+        #endregion
+
+        #region 5.4用限流和抽样抑制事件流
+        private void Button_Click6(object sender, RoutedEventArgs e)
+        {
+            Observable.FromEventPattern<MouseEventHandler, MouseEventArgs>(handler => (s, a) => handler(s, a), handler => MouseMove += handler, handler => MouseMove -= handler)
+                .Select(x => x.EventArgs)
+                .Throttle(TimeSpan.FromSeconds(1))//事件在指定时间段内不再发生时才执行。如果指定的时间段内一直有新事件发生，将一直不会执行。
+                .Subscribe(x => Trace.WriteLine(DateTime.Now.Second + ":Saw " + x.X + x.Y + " items."));
+
+            Observable.FromEventPattern<MouseEventHandler, MouseEventArgs>(handler => (s, a) => handler(s, a), handler => MouseMove += handler, handler => MouseMove -= handler)
+                .Select(x => x.EventArgs)
+                .Sample(TimeSpan.FromSeconds(1))//执行在指定时间段内发生的最后一次事件，如果时间段内没有发送任何事件，将不会执行。
+                .Subscribe(x => Trace.WriteLine(DateTime.Now.Second + ":Saw " + x.X + x.Y + " items."));
+        }
+        #endregion
+
+        #region 5.5超时（超时后内部的操作并没有真正取消，操作将继续执行，直到成功或失败）
+        private void Button_Click7(object sender, RoutedEventArgs e)
+        {
+            //向域名发送一个web请求，并使用1秒超时
+            var client = new HttpClient();
+            client.GetStringAsync("http://www.example.com/").ToObservable()
+                .Timeout(TimeSpan.FromSeconds(1))
+                .Subscribe(x => Trace.WriteLine(DateTime.Now.Second + ":Saw " + x.Length), ex => Trace.WriteLine(ex));
+
+            //鼠标1秒不移动后抛出异常并结束流
+            Observable.FromEventPattern<MouseEventHandler, MouseEventArgs>(handler => (s, a) => handler(s, a), handler => MouseMove += handler, handler => MouseMove -= handler)
+                .Select(x => x.EventArgs)
+                .Timeout(TimeSpan.FromSeconds(1))
+                .Subscribe(x => Trace.WriteLine(DateTime.Now.Second + ":Saw " + (x.X + x.Y)), ex => Trace.WriteLine(ex));
+
+            //超时后由clicks事件序列代替
+            var clicks = Observable.FromEventPattern<MouseEventHandler, MouseEventArgs>(handler => (s, a) => handler(s, a), handler => MouseMove += handler, handler => MouseMove -= handler)
+                .Select(x => x.EventArgs);
+            Observable.FromEventPattern<MouseEventHandler, MouseEventArgs>(handler => (s, a) => handler(s, a), handler => MouseMove += handler, handler => MouseMove -= handler)
+                .Select(x => x.EventArgs)
+                .Timeout(TimeSpan.FromSeconds(1), clicks)
+                .Subscribe(x => Trace.WriteLine(DateTime.Now.Second + ":Saw " + (x.X + x.Y)), ex => Trace.WriteLine(ex));
         }
         #endregion
     }

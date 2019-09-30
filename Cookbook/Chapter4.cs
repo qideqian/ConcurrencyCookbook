@@ -7,10 +7,10 @@ using System.Threading.Tasks.Dataflow;
 
 namespace Cookbook
 {
-    class Chapter4
+    public class Chapter4
     {
         #region 4.1连接数据流块
-        static async void Example1()
+        public static async void Example1()
         {
             var multiplyBlock = new TransformBlock<int, int>(item => item * 2);
             var subtrackBlock = new TransformBlock<int, int>(item => item - 2);
@@ -118,7 +118,7 @@ namespace Cookbook
         #endregion
 
         #region 创建自定义数据流块
-        IPropagatorBlock<int, int> CreateMyCustomBlock()
+        public static IPropagatorBlock<int, int> CreateMyCustomBlock()
         {
             var multiplyBlock = new TransformBlock<int, int>(item => item * 2);
             var addBlock = new TransformBlock<int, int>(item => item + 2);
