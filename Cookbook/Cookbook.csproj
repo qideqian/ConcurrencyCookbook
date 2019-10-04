@@ -105,6 +105,7 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Chapter6.cs" />
+    <Compile Include="Chapter7.cs" />
     <Compile Include="ConcurrencyCookbook.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
