@@ -259,11 +259,50 @@ namespace Cookbook
             //多个消费者
             while (true)
             {
-                var dequeueResult = await _asyncQueue.TryDequeueAsync();
-                if (dequeueResult.Success) break;
-                Trace.WriteLine(dequeueResult.Item);
+                //var dequeueResult = await _asyncQueue.TryDequeueAsync();
+                //if (dequeueResult.Success) break;
+                //Trace.WriteLine(dequeueResult.Item);
             }
         }
+        #endregion
+
+        #region 8.9 异步栈和包（需要有一个管道，在线程之间传递消息或数据，但不想（或不需要）这个管道使用"先进先出"的语义。）
+        async void Example13()
+        {
+            AsyncCollection<int> _asyncStack = new AsyncCollection<int>(new ConcurrentStack<int>());//后进先出（栈）
+            AsyncCollection<int> _asyncBag = new AsyncCollection<int>(new ConcurrentBag<int>());//无序（包）
+
+            //在栈的项目次序上有竞态条件。单线程中如果先运行生存者代码，后运行消费者代码，那项目的次序就像一个普通的栈
+            //生存者代码
+            await _asyncStack.AddAsync(7);
+            await _asyncStack.AddAsync(13);
+            _asyncStack.CompleteAdding();
+            //消费者代码
+            //先显示“13”，后显示“7”
+            while (await _asyncStack.OutputAvailableAsync()) Trace.WriteLine(_asyncStack.TakeAsync());
+
+            //当生产者和消费者都并发运行时（这是常见情况），消费者总是会得到最近加入的项目。这导致这个集合从整体上看不像是一个栈。当然了，包是根本没有次序的。
+        }
+        async void Example14()
+        {
+            //限流
+            AsyncCollection<int> _asyncStack = new AsyncCollection<int>(new ConcurrentStack<int>(), maxCount: 1);
+            await _asyncStack.AddAsync(7);//这个添加过程会立即完成。
+            await _asyncStack.AddAsync(13);//这个添加（异步地）等待，直到7被移除，然后才会加入13。
+            _asyncStack.CompleteAdding();
+
+            //多个消费者
+            while (true)
+            {
+                //var takeResult = await _asyncStack.TryTaskAsync();
+                //if (!takeResult.Success) break;
+                //Trace.WriteLine(takeResult.Item);
+            }
+        }
+        #endregion
+
+        #region 8.10 阻塞/异步队列
+
         #endregion
     }
 }
