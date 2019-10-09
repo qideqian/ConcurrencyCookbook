@@ -301,8 +301,87 @@ namespace Cookbook
         }
         #endregion
 
-        #region 8.10 阻塞/异步队列
+        #region 8.10 阻塞/异步队列（需要一个管道，用“先进先出”的方式在程序的各部分之间传递消息或数据。并且要有足够的灵活性，能以同步或异步方式来处理生存者终端或消费者终端。）
+        //例如，一个后台线程在装载数据并吧数据压入管道，我们希望当管道太满时该线程能同步地阻塞。同时，UI线程在从管道接收数据，我们希望这个线程异步地从管道拉取数据，以便UI保持响应。
+        async void Example15()
+        {
+            BufferBlock<int> queue = new BufferBlock<int>();
+            //生产者代码
+            await queue.SendAsync(7);
+            await queue.SendAsync(13);
+            queue.Complete();
+            //单个消费者时的代码
+            while (await queue.OutputAvailableAsync()) Trace.WriteLine(await queue.ReceiveAsync());
+            //多个消费者时的代码
+            while (true)
+            {
+                int item;
+                try
+                {
+                    item = await queue.ReceiveAsync();
+                }
+                catch (InvalidOperationException)
+                {
+                    break;
+                }
+                Trace.WriteLine(item);
+            }
 
+            //同步API
+            //生产者代码
+            queue.Post(7);
+            queue.Post(13);
+            queue.Complete();
+            //消费者代码
+            while (true)
+            {
+                int item;
+                try
+                {
+                    item = queue.Receive();
+                }
+                catch (InvalidOperationException)
+                {
+                    break;
+                }
+                Trace.WriteLine(item);
+            }
+        }
+        //ActionBlock<T>定义一个带有特定动作的生产者/消费者队列。
+        async void Example16()
+        {
+            ActionBlock<int> queue = new ActionBlock<int>(item => Trace.WriteLine(item));//消费者代码被传给队列的构造函数
+            //异步的生产者代码
+            await queue.SendAsync(7);
+            await queue.SendAsync(13);
+            //同步的生产者代码
+            queue.Post(7);
+            queue.Post(13);
+            queue.Complete();
+        }
+        //如果平台不支持TPL数据流库，可以使用Nito.AsyncEx中的AsyncProducerConsumerQueue<T>类，它同时也支持同步和异步方法。
+        async void Example17()
+        {
+            AsyncProducerConsumerQueue<int> queue = new AsyncProducerConsumerQueue<int>();
+            //异步的生产者代码
+            await queue.EnqueueAsync(7);
+            await queue.EnqueueAsync(13);
+            //同步的生产者代码
+            queue.Enqueue(7);
+            queue.Enqueue(13);
+            queue.CompleteAdding();
+            //单个消费者时的异步代码
+            while (await queue.OutputAvailableAsync()) Trace.WriteLine(await queue.DequeueAsync());
+            //多个消费者时的异步代码
+            while (true)
+            {
+                //var result = await queue.TryDequeueAsync();
+                //if (result.Success) break;
+                //Trace.WriteLine(result.Item);
+            }
+            //同步的消费者代码
+            foreach (var item in queue.GetConsumingEnumerable()) Trace.WriteLine(item);
+        }
         #endregion
     }
 }
