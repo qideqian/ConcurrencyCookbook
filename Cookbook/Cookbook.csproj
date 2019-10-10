@@ -107,6 +107,9 @@
     <Compile Include="Chapter6.cs" />
     <Compile Include="Chapter7.cs" />
     <Compile Include="Chapter8.cs" />
+    <Compile Include="Chapter9.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="ConcurrencyCookbook.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
