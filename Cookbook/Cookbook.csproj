@@ -99,6 +99,7 @@
     <Reference Include="WindowsBase" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Chapter10.cs" />
     <Compile Include="Chapter3.cs" />
     <Compile Include="Chapter4.cs" />
     <Compile Include="Chapter5.cs">

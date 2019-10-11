@@ -2,12 +2,15 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Net.Http;
+using System.Net.NetworkInformation;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Reactive.Threading.Tasks;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Threading.Tasks.Dataflow;
 using System.Windows;
 using System.Windows.Forms;
 using System.Windows.Media;
@@ -216,11 +219,51 @@ namespace Cookbook
         //把发出的取消请求作为对释放订阅接口的相应。
         public void Example()
         {
-            using(var cancellation = new CancellationDisposable())
+            using (var cancellation = new CancellationDisposable())
             {
                 CancellationToken token = cancellation.Token;//把这个标记传递给对它作出相应的方法
             }
             //到这里，这个标记已经是取消的。
+        }
+        #endregion
+
+        #region 9.7 取消数据流网络
+        IPropagatorBlock<int, int> CreateMyCustomBlock(CancellationToken cancellationToken)
+        {
+            var blockOptions = new ExecutionDataflowBlockOptions { CancellationToken = cancellationToken };
+            var multiplyBlock = new TransformBlock<int, int>(item => item * 2, blockOptions);
+            var addBlock = new TransformBlock<int, int>(item => item + 2, blockOptions);
+            var divideBlock = new TransformBlock<int, int>(item => item / 2, blockOptions);
+
+            var flowCompletion = new DataflowLinkOptions { PropagateCompletion = true };
+            multiplyBlock.LinkTo(addBlock, flowCompletion);
+            addBlock.LinkTo(divideBlock, flowCompletion);
+            return DataflowBlock.Encapsulate(multiplyBlock, divideBlock);
+        }
+        #endregion
+
+        #region 9.8 注入取消请求（在参数取消标记的基础上，添加新的取消规则，并联合取消）
+        async Task<HttpResponseMessage> GetWithTimeoutAsync(string url, CancellationToken cancellationToken)
+        {
+            var client = new HttpClient();
+            using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                cts.CancelAfter(TimeSpan.FromSeconds(2));
+                var combinedToken = cts.Token;
+                return await client.GetAsync(url, combinedToken);
+            }
+        }
+        #endregion
+
+        #region 9.9 与其他取消体系的互操作
+        //有一些外部的或以前遗漏下来的代码采用了非标准的取消模式。现在要用标准的CancellationToken来控制这些代码。
+        async Task<PingReply> PingAsync(string hostNameOrAddress, CancellationToken cancellationToken)
+        {
+            var ping = new Ping();
+            using (cancellationToken.Register(() => ping.SendAsyncCancel()))
+            {
+                return await ping.SendPingAsync(hostNameOrAddress);
+            }
         }
         #endregion
     }
