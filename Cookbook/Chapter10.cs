@@ -1,9 +1,12 @@
-﻿using System;
+﻿using Nito.AsyncEx;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
+using System.Runtime.ExceptionServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Cookbook
@@ -156,6 +159,238 @@ namespace Cookbook
                 return Task.WhenAll(instances.OfType<IAsyncInitialization>().Select(x => x.Initialization));
             }
         }
+        #endregion
+
+        #region 10.4 异步属性
+        class AsyncData
+        {
+            //属性可以直接返回一个Task<int>，不建议这么做。这种属性更适合改为方法。
+            public Task<int> Data
+            {
+                get { return GetDataAsync(); }
+            }
+
+            private async Task<int> GetDataAsync()
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+                return 13;
+            }
+
+            //异步属性，只启动一次
+            public AsyncLazy<int> Data2
+            {
+                get { return _data; }
+            }
+            public AsyncLazy<int> _data = new AsyncLazy<int>(async () =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+                return 13;
+            });
+        }
+        //调用方式
+        async Task Example3()
+        {
+            var instance = new AsyncData();
+            var value = await instance.Data;
+        }
+        #endregion
+
+        #region 10.5 异步事件
+        public class MyEventArgs : EventArgs
+        {
+            //延期处理器
+            private readonly DeferralManager _deferrals = new DeferralManager();//编写异步事件处理器时，事件参数类最好是线程安全的，最简单办法就是让它不可变（设为自读）
+
+            //自身构造函数和属性
+
+            public IDisposable GetDeferral()
+            {
+                return _deferrals.DeferralSource.GetDeferral();
+            }
+            internal Task WaitForDeferralsAsync()
+            {
+                return _deferrals.WaitForDeferralsAsync();
+            }
+        }
+
+        public event EventHandler<MyEventArgs> MyEvent;//要执行的事件
+        private Task RaiseMyEventAsync()
+        {
+            var handler = MyEvent;
+            if (handler == null)
+                return Task.FromResult(0);
+            var args = new MyEventArgs();
+            handler(this, args);
+            return args.WaitForDeferralsAsync();
+        }
+
+        //异步事件处理器
+        async void AsyncHandler(object sender, MyEventArgs args)
+        {
+            using (args.GetDeferral())
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2));
+            }
+        }
+        #endregion
+
+        #region 10.6 异步销毁
+        #region Disposable方式
+        class MyClass1 : IDisposable
+        {
+            private readonly CancellationTokenSource _disposeCts = new CancellationTokenSource();
+            public async Task<int> CalculateValueAsync()
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), _disposeCts.Token);
+                return 13;
+            }
+            public void Dispose()
+            {
+                _disposeCts.Cancel();
+            }
+
+            //Dispose及CancellationToken均可销毁
+            public async Task<int> CalculateValueAsync(CancellationToken cancellationToken)
+            {
+                using (var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token))
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2), combinedCts.Token);
+                    return 13;
+                }
+            }
+        }
+        async Task Test()
+        {
+            Task<int> task;
+            using (var resource = new MyClass1())
+            {
+                task = resource.CalculateValueAsync();
+            }
+            var result = await task;//抛出异常OperationCanceledException.
+        }
+        #endregion
+
+        #region “异步完成”方式
+        //一些类需要知道操作完成的时间，需要采用实现“异步完成”的方式。
+        //异步完成与异步初始化很相似：它们都很少有官方的指引资料。
+        //以下是一种可行的模式，它基于TPL数据流块的运行方式。异步完成的重要部分可以封装在一个接口中。
+
+        /// <summary>
+        /// 表明一个类需要异步完成，并提供完成的结果。
+        /// </summary>
+        interface IAsyncCompletion
+        {
+            /// <summary>
+            /// 开始本实例的完成过程。概念上类似于“IDisposable.Dispose”。
+            /// 在调用本方法后，就不能调用除了“Completion”以外的任何成员。
+            /// </summary>
+            void Complete();
+
+            /// <summary>
+            /// 取得本实例完成的结果。
+            /// </summary>
+            Task Completion { get; }
+        }
+        class MyClass2 : IAsyncCompletion
+        {
+            private readonly TaskCompletionSource<object> _completion = new TaskCompletionSource<object>();
+            private Task _completing;
+
+            public Task Completion
+            {
+                get { return _completion.Task; }
+            }
+
+            public void Complete()
+            {
+                if (_completing != null) return;
+                _completing = CompleteAsync();
+            }
+
+            private async Task CompleteAsync()
+            {
+                try
+                {
+                    //异步地等待任何运行中的操作
+                    //异步做类的初始化代码？
+                    await Task.FromResult(1);//如：←
+                }
+                catch (Exception ex)
+                {
+                    _completion.TrySetException(ex);
+                }
+                finally
+                {
+                    _completion.TrySetResult(null);
+                }
+            }
+
+        }
+
+        //调用的辅助方法
+        static class AsyncHelpers
+        {
+            public static async Task Using<TResource>(Func<TResource> construct, Func<TResource, Task> process)
+                where TResource : IAsyncCompletion
+            {
+                var resource = construct();//创建需要使用的资源
+                Exception exception = null;//使用资源，并捕获所有异常
+                try
+                {
+                    await process(resource);
+                }
+                catch (Exception ex)
+                {
+                    exception = ex;
+                }
+                resource.Complete();//完成（逻辑上销毁）资源。
+                await resource.Completion;
+                //如果需要，就重新抛出“process”产生的异常
+                if (exception != null)
+                    ExceptionDispatchInfo.Capture(exception).Throw();
+            }
+            public static async Task<TResult> Using<TResource, TResult>(Func<TResource> construct, Func<TResource, Task<TResult>> process)
+                where TResource : IAsyncCompletion
+            {
+                var resource = construct();//创建需要使用的资源
+                Exception exception = null;//使用资源，并捕获所有异常
+                TResult result = default(TResult);
+                try
+                {
+                    result = await process(resource);
+                }
+                catch (Exception ex)
+                {
+                    exception = ex;
+                }
+                resource.Complete();//完成（逻辑上销毁）资源。
+                try
+                {
+                    await resource.Completion;
+                }
+                catch
+                {
+                    //只有当“process”没有抛出异常时，才允许抛出“Completion”的异常。
+                    if (exception == null)
+                        throw;
+                }
+                //如果需要，就重新抛出“process”产生的异常
+                if (exception != null)
+                    ExceptionDispatchInfo.Capture(exception).Throw();
+                return result;
+            }
+        }
+        //调用代码
+        async Task Test2()
+        {
+            await AsyncHelpers.Using(() => new MyClass2(), async resource =>
+            {
+                // 使用资源。
+                //跟新显示进度？
+                await Task.FromResult(1);//如：←
+            });
+        }
+        #endregion
         #endregion
     }
 }
